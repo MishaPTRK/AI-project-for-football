@@ -3,6 +3,7 @@ import time
 import numpy as np
 from ultralytics import YOLO
 from sklearn.cluster import KMeans
+from TeamAssigner import TeamAssigner
 
 model = YOLO("yolo11s.pt")
 
@@ -23,39 +24,70 @@ countinueValue = True
 if cap.isOpened() == False:
     print("Error opening video stream or file")
 
-
 ret, frame = cap.read()
 Resolution = np.shape(frame)
 
-def InitBGR(crop):
-    h, w = crop.shape[:2]
 
-    t_shirt_region = crop[int(h * 0.3):int(h * 0.5),int(w * 0.35):int(w * 0.65)]
-    B_mean = np.mean(t_shirt_region[:, :, 0])
-    G_mean = np.mean(t_shirt_region[:, :, 1])
-    R_mean = np.mean(t_shirt_region[:, :, 2])
+team_assigner = TeamAssigner()
+team_assigner_ready = False
 
-    return B_mean,G_mean,R_mean
+TEAM_COLORS = {
+    1: (0, 0, 255),
+    2: (255, 0, 0),
+}
+
+def build_player_detections(boxes):
+    player_detections = {}
+    for box in boxes:
+        if box.id is None:
+            continue
+        cls = int(box.cls[0].item())
+        if cls != 0:
+            continue
+        s = box.xyxy[0].tolist()
+        x1, y1, x2, y2 = int(s[0]), int(s[1]), int(s[2]), int(s[3])
+        ID = int(box.id[0].item())
+        player_detections[ID] = {"bbox": [x1, y1, x2, y2]}
+    return player_detections
+
+
 
 
 def StartTracking(frame):
+    global team_assigner, team_assigner_ready
+
     results = model.track(frame, persist=True, tracker="bytetrack.yaml",classes=[0],conf=0.2,verbose=False)
     boxes = results[0].boxes
 
+    if not team_assigner_ready:
+        player_detections = build_player_detections(boxes)
+        if len(player_detections) >= 2:
+            team_assigner.assign_team_color(frame, player_detections)
+            team_assigner_ready = True
+
     for box in boxes:
+        if box.id is None:
+            continue
+
         s = box.xyxy[0].tolist()
         x1, y1, x2, y2 = int(s[0]), int(s[1]), int(s[2]), int(s[3])
         conf = box.conf[0].item()
         cls = int(box.cls[0].item())
         ID = int(box.id[0].item())
+
+
         if cls == 0:
-            cv2.putText(frame, f"ID: {ID}  {conf:.2f}", (x1-25, y1 - 15), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), thickness=2)
+            color = (0, 255, 255)  # default before calibration
+            if team_assigner_ready:
+                try:
+                    team_id = team_assigner.GetPlayerTeam(frame, [x1, y1, x2, y2], ID)
+                    color = TEAM_COLORS.get(team_id, (0, 255, 255))
+                except Exception as e:
+                    print(f"Team assign error: {e}")
 
             player_crop = frame[y1:y2, x1:x2]
-
-            B,G,R = InitBGR(player_crop)
-
+            cv2.putText(frame, f"ID: {ID} {conf:.2f}", (x1 - 25, y1 - 15), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 0, 0), thickness=2)
 
             foot_x = (x1 + x2) // 2
             foot_y = y2
@@ -68,7 +100,7 @@ def StartTracking(frame):
                 0,
                 320,
                 590,
-                (0, 255, 255),
+                color,
                 3
             )
 
