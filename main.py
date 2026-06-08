@@ -34,6 +34,7 @@ team_assigner_ready = False
 TEAM_COLORS = {
     1: (0, 0, 255),
     2: (255, 0, 0),
+    3: (0, 255, 255),
 }
 
 def build_player_detections(boxes):
